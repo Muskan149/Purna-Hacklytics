@@ -1,6 +1,7 @@
-# Purna Meal Planner
+# Purna
 
-A meal planning app built with Vite, React, TypeScript, and shadcn-ui.
+Let's make Healthy convenient
+Purna builds a weekly meal plan around your budget, reuses ingredients to cut costs, and finds SNAP-supporting stores near you.
 
 ## Prerequisites
 
