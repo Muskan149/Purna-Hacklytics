@@ -23,18 +23,24 @@ const Stores = () => {
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usdaNoStoresForZip, setUsdaNoStoresForZip] = useState(false);
 
   useEffect(() => {
     const z = zip.replace(/\D/g, "").slice(0, 5);
     if (z.length !== 5) {
       setStores([]);
       setError(null);
+      setUsdaNoStoresForZip(false);
+      setLoading(false);
       return;
     }
     setError(null);
     setLoading(true);
+    let cancelled = false;
     fetchSnapStores(z)
       .then((list) => {
+        if (cancelled) return;
+        setUsdaNoStoresForZip(list.length === 0);
         const snapStores = list.map(mapBackendSnapStoreToStore);
         const extraStores =
           z === DEMO_ZIP_SUPERMARKETS
@@ -47,10 +53,16 @@ const Stores = () => {
         setStores(withSupermarkets);
       })
       .catch((err) => {
+        if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load stores");
         setStores([]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [zip]);
 
   const filtered = stores
@@ -112,9 +124,11 @@ const Stores = () => {
               <div className="rounded-2xl border border-border bg-card p-10 text-center">
                 <MapPin size={36} className="mx-auto mb-3 text-muted-foreground/40" />
                 <p className="text-sm text-muted-foreground">
-                  {zip.replace(/\D/g, "").length === 5
-                    ? "No stores found. Try expanding your radius or turn off “SNAP only”."
-                    : "Enter a 5-digit zip code to find stores."}
+                  {zip.replace(/\D/g, "").length !== 5
+                    ? "Enter a 5-digit zip code to find stores."
+                    : usdaNoStoresForZip
+                      ? "The USDA website does not have any SNAP-friendly stores close to this zip code."
+                      : "No stores found. Try expanding your radius or turn off “SNAP only\"."}
                 </p>
               </div>
             )}

@@ -180,19 +180,34 @@ export interface BackendSnapStore {
   distance_miles: number;
 }
 
-/** Fetch closest SNAP stores by zip code. Returns list ordered by distance (closest first). */
+const SNAP_STORES_TIMEOUT_MS = 15_000;
+
+/** Fetch closest SNAP stores by zip code. Returns list ordered by distance (closest first). Times out after 15s to avoid stuck loading. */
 export async function fetchSnapStores(zipCode: string): Promise<BackendSnapStore[]> {
   const q = encodeURIComponent(zipCode.trim());
-  const res = await fetch(`${API_BASE}/snap-stores/closest?zip_code=${q}`);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`SNAP stores API error ${res.status}: ${text}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SNAP_STORES_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/snap-stores/closest?zip_code=${q}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`SNAP stores API error ${res.status}: ${text}`);
+    }
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : [];
+    return list
+      .filter((s: BackendSnapStore) => s != null && typeof s.distance_miles === "number")
+      .sort((a: BackendSnapStore, b: BackendSnapStore) => a.distance_miles - b.distance_miles);
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("Stores request timed out. Please try again.");
+    }
+    throw err;
   }
-  const data = await res.json();
-  const list = Array.isArray(data) ? data : [];
-  return list
-    .filter((s: BackendSnapStore) => s != null && typeof s.distance_miles === "number")
-    .sort((a: BackendSnapStore, b: BackendSnapStore) => a.distance_miles - b.distance_miles);
 }
 
 /** Build address string from backend SNAP store fields. */

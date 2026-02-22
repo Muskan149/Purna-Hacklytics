@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Clock, Users, DollarSign, RefreshCw, Clipboard, Printer, Download,
   ArrowRight, Repeat, Leaf, MapPin, ExternalLink,
@@ -328,56 +330,118 @@ const IngredientsTab = ({ ingredients }: { ingredients: IngredientAggregate[] })
 
 /* ─── Stores Tab ───────────────────────────────────── */
 const StoresTab = () => {
-  const { preferences } = usePurnaStore();
-  const zip = (preferences.zipCode ?? "").replace(/\D/g, "").slice(0, 5);
+  const { preferences, setPreferences } = usePurnaStore();
+  const prefZip = (preferences.zipCode ?? "").replace(/\D/g, "").slice(0, 5);
+  const [zip, setZip] = useState(prefZip);
   const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usdaNoStoresForZip, setUsdaNoStoresForZip] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
+
+  // Keep local zip in sync when preferences load (e.g. after nav from plan)
+  useEffect(() => {
+    if (prefZip.length === 5 && zip !== prefZip) setZip(prefZip);
+  }, [prefZip]);
+
+  // Persist zip to preferences when user enters 5 digits so plan step stays in sync
+  useEffect(() => {
+    const z = zip.replace(/\D/g, "").slice(0, 5);
+    if (z.length === 5 && preferences.zipCode !== z) setPreferences({ zipCode: z });
+  }, [zip, preferences.zipCode, setPreferences]);
 
   useEffect(() => {
-    if (zip.length !== 5) {
+    const z = zip.replace(/\D/g, "").slice(0, 5);
+    if (z.length !== 5) {
       setStores([]);
       setError(null);
+      setUsdaNoStoresForZip(false);
+      setLoading(false);
       return;
     }
     setError(null);
     setLoading(true);
-    fetchSnapStores(zip)
+    let cancelled = false;
+    fetchSnapStores(z)
       .then((list) => {
-        const snapStores = list.map(mapBackendSnapStoreToStore);
-        const extraStores =
-          zip === DEMO_ZIP_SUPERMARKETS
-            ? demoSupermarkets
-            : zip === DEMO_ZIP_30332
-              ? demoSupermarkets30332
-              : [];
-        const withSupermarkets = [...snapStores, ...extraStores];
-        withSupermarkets.sort((a, b) => a.distanceMiles - b.distanceMiles);
-        setStores(withSupermarkets);
+        if (cancelled) return;
+        setUsdaNoStoresForZip(list.length === 0);
+        try {
+          const snapStores = list.map(mapBackendSnapStoreToStore);
+          const extraStores =
+            z === DEMO_ZIP_SUPERMARKETS
+              ? demoSupermarkets
+              : z === DEMO_ZIP_30332
+                ? demoSupermarkets30332
+                : [];
+          const withSupermarkets = [...snapStores, ...extraStores];
+          withSupermarkets.sort((a, b) => a.distanceMiles - b.distanceMiles);
+          setStores(withSupermarkets);
+        } catch (parseErr) {
+          setError(parseErr instanceof Error ? parseErr.message : "Could not load store list");
+          setStores([]);
+        }
       })
       .catch((err) => {
+        if (cancelled) return;
         setError(err instanceof Error ? err.message : "Failed to load stores");
         setStores([]);
       })
-      .finally(() => setLoading(false));
-  }, [zip]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [zip, retryKey]);
+
+  const handleRetry = () => {
+    setError(null);
+    setRetryKey((k) => k + 1);
+  };
+
+  const zipDigits = zip.replace(/\D/g, "").slice(0, 5);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-lg font-bold text-foreground">Nearby Stores</h2>
-        <Badge variant="outline" className="rounded-lg text-xs">Closest first</Badge>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="stores-zip" className="text-xs text-muted-foreground whitespace-nowrap">Zip</Label>
+            <Input
+              id="stores-zip"
+              value={zip}
+              onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
+              placeholder="30558"
+              className="w-24 h-8 rounded-lg text-sm"
+              maxLength={5}
+            />
+          </div>
+          <Badge variant="outline" className="rounded-lg text-xs">Closest first</Badge>
+        </div>
       </div>
       {error && (
-        <div className="rounded-2xl border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
-          {error}
+        <div className="rounded-2xl border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive flex flex-wrap items-center justify-between gap-2">
+          <span>{error}</span>
+          <Button variant="outline" size="sm" className="rounded-lg shrink-0" onClick={handleRetry}>
+            <RefreshCw size={14} className="mr-1" /> Retry
+          </Button>
         </div>
       )}
       {loading && (
-        <p className="text-sm text-muted-foreground">Loading stores for {zip}…</p>
+        <p className="text-sm text-muted-foreground">Loading stores for {zipDigits || "…"}…</p>
       )}
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-3">
+          {!loading && stores.length === 0 && usdaNoStoresForZip && (
+            <div className="rounded-2xl border border-border bg-card p-6 text-center">
+              <MapPin size={32} className="mx-auto mb-2 text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground">
+                The USDA website does not have any SNAP-friendly stores close to this zip code.
+              </p>
+            </div>
+          )}
           {!loading && stores.map((store) => (
             <div key={store.id} className="rounded-2xl border border-border bg-card p-4 shadow-card">
               <div className="flex items-start justify-between">
@@ -408,8 +472,8 @@ const StoresTab = () => {
               </div>
             </div>
           ))}
-          {!loading && zip.length !== 5 && (
-            <p className="text-sm text-muted-foreground">Set your zip code in the plan step to see nearby stores.</p>
+          {!loading && zipDigits.length !== 5 && (
+            <p className="text-sm text-muted-foreground">Enter a 5-digit zip code above to see nearby stores.</p>
           )}
         </div>
 
