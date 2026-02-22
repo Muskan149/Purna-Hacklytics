@@ -14,6 +14,7 @@ A meal planning app built with Vite, React, TypeScript, and shadcn-ui.
 ```sh
 git clone https://github.com/muskan149/purna-meal-planner.git
 cd purna-meal-planner
+cd purna-frontend
 ```
 
 ### 2. Install dependencies
